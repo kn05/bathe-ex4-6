@@ -1,31 +1,16 @@
 using SparseArrays
 using LinearAlgebra
 using Plots
-using Symbolics
-using SymbolicNumericIntegration
+using Integrals
+using Cubature
 
 LM_1 = [9, 3, 1, 7, 10, 4, 2, 8]
 LM_2 = [11, 5, 3, 9, 12, 6, 4, 10]
 LM_3 = [15, 9, 7, 13, 16, 10, 8, 14]
 LM_4 = [17, 11, 9, 15, 18, 12, 10, 16]
 
-# calculate local stiffness matrix
-function calc_K_m(LM::Vector{Int64})
-    # Will be modified to receive it as a function argument later
-    # E = 2.07e13  # P, 
-    # nu = 0.30
-    x_min, x_max = -1., 1.
-    y_min, y_max = -1., 1.
-
-    @variables x y E nu
-
-    C_m = E / (1 - nu^2) * [
-        1 nu 0;
-        nu 1 0
-        0 0 (1-nu)/2
-    ]
-
-    B = 1 / 4 * [
+function calc_B_mat(x::Float64, y::Float64, LM::Vector{Int64})
+    B =  1 / 4 * [
         (1+y) -(1 + y) -(1 - y) (1-y) 0 0 0 0;
         0 0 0 0 (1+x) (1-x) -(1 - x) -(1 + x);
         (1+x) (1-x) -(1 - x) -(1 + x) (1+y) -(1 + y) -(1 - y) (1-y)
@@ -39,22 +24,31 @@ function calc_K_m(LM::Vector{Int64})
     end
     B_m_dense = Matrix(B_m_sparse)
 
+    return B_m_dense
+end
+
+# calculate local stiffness matrix
+function calc_K_m(LM::Vector{Int64})
+    # Will be modified to receive it as a function argument later
+    # E = 2.07e13  # P, 
+    # nu = 0.30
+    x_min, x_max = -1., 1.
+    y_min, y_max = -1., 1.
+
+    E = 2.07e5
+    nu = 0.30
+
+    C_m = E / (1 - nu^2) * [
+        1 nu 0;
+        nu 1 0
+        0 0 (1-nu)/2
+    ]
 
     # K_m = int_V B^T C B dV
-    # !! This integrate have error, have to fix it
-    integrand = B_m_dense' * C_m * B_m_dense
-    integral_x = integrate(integrand, x; symbolic=true, detailed=false)
-
-    eval_x = substitute(integral_x, Dict([x => x_max])) - substitute(integral_x, Dict([x => x_min]))
-    simple_eval_x = simplify(eval_x)
-    
-    integral_y = integrate(simple_eval_x, y; symbolic=true, detailed=false)
-    simple_integral_y = simplify(integral_y)
-    
-    println(simple_integral_y)
-
-    eval_y = substitute(simple_integral_y, Dict([y => y_max])) - substitute(simple_integral_y, Dict([y => y_min]))
-    K_m = substitute(eval_y, Dict([E => 1., nu => 0.5]))
+    BtCB(u, p) = calc_B_mat(u[1], u[2], LM)' * C_m * calc_B_mat(u[1], u[2], LM)
+    domain = ([-1., -1.], [1., 1.])
+    prob = IntegralProblem(BtCB, domain)
+    K_m = solve(prob, CubatureJLh(); reltol = 1e-3, abstol = 1e-3)
     
     return K_m
 end
