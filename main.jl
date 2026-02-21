@@ -35,7 +35,7 @@ function calc_K_m(LM::Vector{Int64})
     x_min, x_max = -1., 1.
     y_min, y_max = -1., 1.
 
-    E = 2.07e5
+    E = 2.07e12
     nu = 0.30
 
     C_m = E / (1 - nu^2) * [
@@ -53,6 +53,31 @@ function calc_K_m(LM::Vector{Int64})
     return K_m
 end
 
+function impose_constrain(method::Val{:penalty}, K, fixed_dofs, penalty=1.0e24)
+    K_constrained = copy(K)
+    for i in fixed_dofs
+        K_constrained[i, i] += penalty
+    end
+end
+
+function impose_constrain(method::Val{:exact}, K, fixed_dofs, R)
+    K_constrained = copy(K)
+
+    # U_a : unknown displacement, U_b: prescribed displacement
+    # at here, fixed dof means zero displacement
+    b = fixed_dofs
+    a = setdiff(collect(1:size), b)
+    U_b = zeros(length(fixed_dofs))
+    K_aa = @view K[a, a]
+    K_ab = @view K[a, b]
+    K_ba = @view K[b, a]
+    K_bb = @view K[b, b]
+    U_a = inv(K_aa) * (R_aa - K_ab * U_b)
+    R_r = K_ba*U_a + K_bb*U_b - R
+
+    return U_a, R_r
+end
+
 function main()
     K_global = spzeros(18, 18)
     for LM in [LM_1, LM_2, LM_3, LM_4]
@@ -64,14 +89,9 @@ function main()
     R[18] = -1.
 
     K_constrained = copy(K_global)
-    R_constrained = copy(R)
-
-    # Apply boundary conditions using the penalty method
     fixed_dofs = [1, 2, 3, 4, 5, 6]
-    penalty = 1.0e24 # large number
-    for i in fixed_dofs
-        K_constrained[i, i] += penalty
-    end
+
+    K_constrained = impose_constrain(K, fixed_dofs, Val(:panalty))
 
     U = inv(K_constrained) * R_constrained
 
